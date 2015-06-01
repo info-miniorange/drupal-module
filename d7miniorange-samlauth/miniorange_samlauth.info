@@ -1,0 +1,9 @@
+name = miniOrange SAML SSO
+description = Single Sign On into Drupal using miniOrange.
+core = 7.x
+package = SAML Authentication
+
+files[] = initialize.php
+php = 5.5
+version = 7.37
+configure = admin/config/miniorange_samlauth

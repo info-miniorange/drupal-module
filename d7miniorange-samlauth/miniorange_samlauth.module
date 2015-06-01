@@ -1,0 +1,180 @@
+<?php
+
+/**
+ * Implements hook_menu()
+ */
+function miniorange_samlauth_menu() {
+	$items = array();
+	
+	$items['admin/config/miniorange_samlauth'] = array(
+	'title' => "miniOrange SAML Authentication",
+	'page callback' => "drupal_get_form",
+	'page arguments' => array('miniorange_saml_form'),
+	'access callback' => TRUE,	// must return true, otherwise it will not visible as menu item
+	);
+	
+	$items['miniorange_samlauth/samlsso'] = array(
+    'title' => 'Service Provider Initiated SAML SSO',
+    'page callback' => 'miniorange_saml_authnrequest',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK
+	);
+	
+	$items['miniorange_samlauth/acs'] = array(
+    'title' => 'SAML Assertion Consumer Service',
+    'page callback' => 'miniorange_saml_acs',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK
+	);
+	
+	return $items;
+}
+
+/**
+ *  Implements hook_help.
+ *  
+ *  Displays help and module information.
+ *  
+ *  @param path  Which path of the site we're using to display help
+ *  @param arg   Array that holds the current path as returned from arg() function
+ */
+function miniorange_samlauth_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#miniorange_samlauth":
+      return '<p>'.  t("This module enables Drupal to function as a SAML Service Provider. Using this the users can login to Drupal through miniOrange as an IDP.") .'</p>';
+      break;
+   }
+}
+
+/**
+ *	Implements hook_form_user_login_block_alter().
+ *	This adds SAML Login link to the user login page of Drupal.
+ */
+function miniorange_samlauth_form_user_login_block_alter(&$form, &$form_state) {
+	$items = array();
+    $items[] = array(
+      'data' => l(t('Log in using miniOrange'), url('miniorange_samlauth/samlsso', array('relative' => TRUE)), array('external' => TRUE)), 
+      'class' => array('saml-link'),
+    );
+	
+	$form['miniorange_samlauth_login_link'] = array(
+      '#theme' => 'item_list', 
+      '#items' => $items, 
+      '#attributes' => array('class' => array('miniorange_samlauth_login-link')), 
+      '#weight' => 1,
+    );
+
+    $form['links']['#weight'] = 2;
+}
+
+/**
+ *	Implements hook_permission()  
+ */
+function miniorange_samlauth_permission(){
+  return array(
+    'config saml' => array(
+      'title' => t('Configure miniOrange SAML2 authentication'),
+      'restricted' => TRUE
+    )
+  );
+}
+
+/**
+ *	This function displays miniorange_samlauth module settings page
+ *	to Drupal administrator.
+ */
+function miniorange_saml_form() {
+	$form = array();
+	
+	$form['saml_module'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('miniOrange SAML SSO Settings')    
+	);
+
+	$form['saml_module']['info'] = array(
+		'#markup' => t('This module handles User authentication against miniOrange SAML identity provider.')
+	);
+
+	// IDP settings
+	$form['saml_idp'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('Identity Provider Settings')
+	);
+
+	$form['saml_idp']['info'] = array(
+		'#markup' => t('<p>Enter the information of the IDP that will be used with Drupal for Single Sign On.</p>')
+	);
+
+	$form['saml_idp']['saml_idp_entityid'] = array(
+		'#type' => 'textfield',
+		'#title' => t('IdP Entity Id'),
+		'#default_value' => variable_get('saml_idp_entityid', ''),
+		'#description' => t('This is the identifier of Idp Entity (Issuer URL).'),
+		'#required' => TRUE
+	);
+
+	$form['saml_idp']['saml_idp_sso'] = array(
+		'#type' => 'textfield',
+		'#title' => t('Single Sign On Service Url'),
+		'#default_value' => variable_get('saml_idp_sso', ''),
+		'#description' => t('SSO endpoint info of the IdP. URL target of the IdP where the Service Provider will send the Authentication Request. ("SAML 2.0 Endpoint (HTTP)")'),
+		'#required' => TRUE
+	);
+	
+	$form['saml_idp']['saml_idp_x509cert'] = array(
+		'#type' => 'textarea',
+		'#title' => t('X.509 Certificate'),
+		'#default_value' => variable_get('saml_idp_x509cert', ''),
+		'#description' => t('Public x509 certificate of the IdP. ("X.509 certificate")'),
+		'#required' => TRUE
+	);
+	
+	return system_settings_form($form);
+}
+
+/**
+ * This function is used to create an authentication request
+ * and initiate login process
+ */
+function miniorange_saml_authnrequest() {
+	require_once dirname(__FILE__) . '/saml2/AuthnRequest.php';
+	
+	$authRequest = new miniOrange_AuthnRequest();
+	$authRequest->initiateLogin();
+	
+	exit();
+}
+
+function miniorange_saml_acs() {
+	
+	require_once dirname(__FILE__) . '/saml2/Acs.php';
+	
+	// Get the email of the user
+	$miniOrangeAcs = new miniOrange_Acs();
+	$email = $miniOrangeAcs->processSAMLResponse();
+
+	// Query to get active user by email address provided from response
+    $query = new EntityFieldQuery();
+    $query->entityCondition('entity_type', 'user')
+          ->propertyCondition('status', 1)
+          ->propertyCondition('mail', $email);
+		  
+	$result = $query->execute();
+	 if ($result && $user = user_load(key($result['user']))) {
+		$GLOBALS['user'] = $user;
+		$login_array['uid'] = $user->uid;
+		
+		user_login_finalize($login_array);
+		
+		drupal_goto();
+		
+	} else {
+		drupal_set_message("We did not find the user in our system. Please register.", 'error', FALSE);
+		drupal_goto();
+	}
+	
+	
+	
+}
+
+?>
